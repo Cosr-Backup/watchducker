@@ -40,14 +40,14 @@ go build -o watchducker .
 ### Docker
 
 ```bash
-# 检查指定容器
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock naomi233/watchducker:latest watchducker nginx redis mysql
-# 检查所有带有更新标签的容器
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock naomi233/watchducker:latest watchducker --label
+# 检查指定容器一次
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock naomi233/watchducker:latest watchducker --once nginx redis mysql
+# 检查所有带有更新标签的容器一次
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock naomi233/watchducker:latest watchducker --label --once
 # 只更新镜像，不重启容器
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock naomi233/watchducker:latest watchducker --no-restart nginx redis
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock naomi233/watchducker:latest watchducker --no-restart --once nginx redis
 # 使用标签模式，同时防止自动重启
-docker run --rm -v /var/run/docker.sock:/var/run/docker.sock naomi233/watchducker:latest watchducker --label --no-restart
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock naomi233/watchducker:latest watchducker --label --no-restart --once
 # 每天凌晨2点检查所有标签容器
 docker run --name watchducker -v /var/run/docker.sock:/var/run/docker.sock naomi233/watchducker:latest watchducker --cron "0 2 * * *" --label
 # 每30分钟检查指定容器
@@ -60,13 +60,13 @@ docker run --name watchducker -v /var/run/docker.sock:/var/run/docker.sock naomi
 
 ```bash
 # 检查指定容器
-watchducker nginx redis mysql
+watchducker --once nginx redis mysql
 # 检查所有带有更新标签的容器
-watchducker --label
+watchducker --label --once
 # 只更新镜像，不重启容器
-watchducker --no-restart nginx redis
+watchducker --no-restart --once nginx redis
 # 使用标签模式，同时防止自动重启
-watchducker --label --no-restart
+watchducker --label --no-restart --once
 # 每天凌晨2点检查所有标签容器
 watchducker --cron "0 2 * * *" --label
 # 每30分钟检查指定容器
@@ -98,7 +98,8 @@ services:
 
 - `--label`: 检查所有带有 `watchducker.update=true` 标签的容器
 - `--no-restart`: 只更新镜像，不重启容器
-- `--cron`: 定时执行，使用标准 [cron 表达式](https://crontab.guru) 格式
+- `--cron`: 定时执行，使用标准 [cron 表达式](https://crontab.guru) 格式，默认 "0 2 * * *"
+- `--once`: 只执行一次检查和更新，然后退出
 - 容器名称列表
 
 ### 环境变量
