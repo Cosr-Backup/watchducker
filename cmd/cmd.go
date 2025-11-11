@@ -35,7 +35,7 @@ func RunOnce(ctx context.Context) {
 
 	if len(cfg.ContainerNames()) > 0 {
 		checkContainersByName(ctx)
-	} else if cfg.UseLabel() {
+	} else if cfg.CheckLabel() {
 		checkContainersByLabel(ctx)
 	} else {
 		config.PrintUsage()
@@ -95,7 +95,7 @@ func RunChecker(ctx context.Context, checkFunc func(*core.Checker) (*types.Batch
 		return
 	}
 
-	if !cfg.UseNoRestart() && result.Summary.Updated > 0 {
+	if !cfg.NoRestart() && result.Summary.Updated > 0 {
 		// 创建操作器
 		operator, err := core.NewOperator()
 		if err != nil {

@@ -111,3 +111,17 @@ func (is *ImageService) CheckUpdate(ctx context.Context, imageName string) (*typ
 
 	return result, nil
 }
+
+// CleanDanglingImages 清理悬空镜像
+func (is *ImageService) CleanDanglingImages(ctx context.Context) error {
+	cli := is.clientManager.GetClient()
+
+	_, err := cli.ImagesPrune(ctx, filters.NewArgs(
+		filters.Arg("dangling", "true"),
+	))
+	if err != nil {
+		return fmt.Errorf("清理悬空镜像失败: %w", err)
+	}
+
+	return nil
+}

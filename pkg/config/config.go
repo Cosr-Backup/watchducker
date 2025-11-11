@@ -11,8 +11,8 @@ import (
 
 // Config 全局配置结构体
 type Config struct {
-	useLabel       bool     `mapstructure:"label"`
-	useNoRestart   bool     `mapstructure:"no-restart"`
+	checkLabel     bool     `mapstructure:"label"`
+	noRestart      bool     `mapstructure:"no-restart"`
 	runOnce        bool     `mapstructure:"-"`
 	cronExpression string   `mapstructure:"cron"`
 	containerNames []string `mapstructure:"-"` // 位置参数，不通过mapstructure绑定
@@ -43,16 +43,17 @@ func Get() *Config {
 	return globalConfig
 }
 
-// UseLabel 获取 UseLabel 配置
-func (c *Config) UseLabel() bool {
-	return c.useLabel
+// CheckLabel 获取 CheckLabel 配置
+func (c *Config) CheckLabel() bool {
+	return c.checkLabel
 }
 
-// UseNoRestart 获取 UseNoRestart 配置
-func (c *Config) UseNoRestart() bool {
-	return c.useNoRestart
+// NoRestart 获取 NoRestart 配置
+func (c *Config) NoRestart() bool {
+	return c.noRestart
 }
 
+// RunOnce 获取 RunOnce 配置
 func (c *Config) RunOnce() bool {
 	return c.runOnce
 }
@@ -98,8 +99,8 @@ func loadConfig() (*Config, error) {
 
 	// 创建配置实例
 	config := &Config{
-		useLabel:       v.GetBool("label"),
-		useNoRestart:   v.GetBool("no-restart"),
+		checkLabel:     v.GetBool("label"),
+		noRestart:      v.GetBool("no-restart"),
 		runOnce:        v.GetBool("once"),
 		cronExpression: v.GetString("cron"),
 		// 获取位置参数（容器名称）
@@ -124,8 +125,8 @@ func loadConfig() (*Config, error) {
 // Validate 验证配置的有效性
 func (c *Config) validate() error {
 	// 验证至少需要一种检查方式
-	if len(c.containerNames) == 0 && !c.useLabel {
-		return fmt.Errorf("必须指定容器名称或使用 --label 选项")
+	if len(c.containerNames) == 0 && !c.checkLabel {
+		return fmt.Errorf("必须指定容器名称或使用 --label")
 	}
 
 	return nil
