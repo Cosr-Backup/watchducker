@@ -1,14 +1,12 @@
 version: 2
 
 builds:
-  -
-    binary: watchducker
+  - binary: watchducker
     goos:
       - linux
       - windows
     goarch:
       - amd64
-      - arm
       - arm64
 
 archives:
@@ -19,3 +17,20 @@ archives:
         formats: zip
     files:
       - LICENSE
+      - push.yaml.example
+
+dockers_v2:
+  - images:
+      - "{{ .Env.DOCKERHUB_USERNAME }}/{{ .Env.IMAGE_NAME }}"
+
+    tags:
+      - "v{{ .Version }}"
+      - "{{ if .IsNightly }}nightly{{ end }}"
+      - "{{ if not .IsNightly }}latest{{ end }}"
+
+    platforms:
+      - linux/amd64
+      - linux/arm64
+
+    extra_files:
+      - push.yaml.example
