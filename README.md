@@ -58,8 +58,17 @@ docker run --name watchducker -v /var/run/docker.sock:/var/run/docker.sock naomi
 # 每天执行，只检查不重启
 docker run --name watchducker -v /var/run/docker.sock:/var/run/docker.sock naomi233/watchducker:latest watchducker --cron "@daily" --no-restart nginx
 
-# 使用通知功能（需要配置 push.yaml）
+# 使用通知功能（方式一：挂载配置文件）
 docker run --name watchducker -v /var/run/docker.sock:/var/run/docker.sock -v $(pwd)/push.yaml:/app/push.yaml naomi233/watchducker:latest watchducker --cron "0 2 * * *" --label
+
+# 使用通知功能（方式二：环境变量，无需挂载配置文件）
+docker run --name watchducker \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e WATCHDUCKER_SETTING_PUSH_SERVER=telegram \
+  -e WATCHDUCKER_TELEGRAM_API_URL=api.telegram.org \
+  -e WATCHDUCKER_TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN \
+  -e WATCHDUCKER_TELEGRAM_CHAT_ID=YOUR_CHAT_ID \
+  naomi233/watchducker:latest watchducker --cron "0 2 * * *" --label
 ```
 
 ### 可执行文件
@@ -110,7 +119,9 @@ services:
 
 - `--label`: 检查所有带有 `watchducker.update=true` 标签的容器
 - `--no-restart`: 只更新镜像，不重启容器
-- `--all`: 检查所有容器
+- `--all`: 检查所有容器（默认仅包含运行中的容器）
+- `--disabled-containers`: 排除指定的容器，不进行检查和更新（支持逗号分隔多个容器）
+- `--include-stopped`: 在检查时包含已停止的容器
 - `--clean`: 更新容器后自动清理悬空镜像
 - `--cron`: 定时执行，使用标准 [cron 表达式](https://crontab.guru) 格式，默认 "0 2 * * *"
 - `--once`: 只执行一次检查和更新，然后退出
@@ -118,7 +129,9 @@ services:
 
 ### 通知功能配置
 
-WatchDucker 支持同时使用多种通知渠道，通过 `push.yaml` 配置文件进行配置：
+WatchDucker 支持同时使用多种通知渠道，可通过 `push.yaml` 配置文件或环境变量进行配置。
+
+#### 方式一：配置文件（推荐）
 
 ```yaml
 setting:
@@ -131,6 +144,45 @@ telegram:
   chat_id: "YOUR_CHAT_ID"  # 聊天ID
 
 # 其他通知方式配置...
+```
+
+#### 方式二：环境变量（无需挂载配置文件）
+
+环境变量会覆盖配置文件中的对应值，格式为 `WATCHDUCKER_` + 配置路径（用下划线连接）：
+
+```bash
+# 基础配置
+export WATCHDUCKER_SETTING_PUSH_SERVER="telegram,dingrobot"
+export WATCHDUCKER_SETTING_LOG_LEVEL="INFO"
+
+# Telegram 配置
+export WATCHDUCKER_TELEGRAM_API_URL="api.telegram.org"
+export WATCHDUCKER_TELEGRAM_BOT_TOKEN="YOUR_BOT_TOKEN"
+export WATCHDUCKER_TELEGRAM_CHAT_ID="YOUR_CHAT_ID"
+
+# 钉钉配置
+export WATCHDUCKER_DINGROBOT_WEBHOOK="https://oapi.dingtalk.com/robot/send?access_token=xxx"
+export WATCHDUCKER_DINGROBOT_SECRET="SECxxx"
+```
+
+Docker Compose 环境变量示例：
+
+```yml
+services:
+  watchducker:
+    image: naomi233/watchducker
+    container_name: watchducker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - TZ=Asia/Shanghai
+      - WATCHDUCKER_CRON=0 2 * * *
+      - WATCHDUCKER_LABEL=true
+      # 通知配置（无需挂载 push.yaml）
+      - WATCHDUCKER_SETTING_PUSH_SERVER=telegram
+      - WATCHDUCKER_TELEGRAM_API_URL=api.telegram.org
+      - WATCHDUCKER_TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
+      - WATCHDUCKER_TELEGRAM_CHAT_ID=YOUR_CHAT_ID
 ```
 
 支持的通知服务：
@@ -158,8 +210,11 @@ telegram:
 # 等同于 --label 选项
 export WATCHDUCKER_LABEL=true
 
-# 等同于 --label 选项
+# 等同于 --all 选项
 export WATCHDUCKER_ALL=true
+
+# 等同于 --include-stopped 选项
+export WATCHDUCKER_INCLUDE_STOPPED=true
 
 # 等同于 --no-restart 选项
 export WATCHDUCKER_NO_RESTART=true
@@ -170,9 +225,19 @@ export WATCHDUCKER_CLEAN=true
 # 等同于 --cron 选项
 export WATCHDUCKER_CRON="0 2 * * *"
 
+# 等同于 --disabled-containers 选项
+export WATCHDUCKER_DISABLED_CONTAINERS="container1,container2"
+
 # 设置日志级别 (DEBUG/INFO/WARN/ERROR)
 export WATCHDUCKER_LOG_LEVEL=DEBUG
+
+# 设置容器时区（默认 UTC，可按需覆盖）
+export TZ=Asia/Shanghai
 ```
+
+### 时区配置
+
+容器镜像默认按照 UTC 运行。只需通过标准 `TZ` 环境变量（如 `-e TZ=Asia/Shanghai`，或在 Compose/环境配置中设置 `TZ`）即可让容器启动时自动切换到目标时区，无需额外挂载 `/etc/localtime`。
 
 ### 使用标签驱动更新
 
