@@ -3,10 +3,12 @@ package docker
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"watchducker/internal/types"
 	"watchducker/pkg/logger"
+	"watchducker/pkg/utils"
 
 	dockerTypes "github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -109,8 +111,8 @@ func (cs *ContainerService) GetByLabel(ctx context.Context, labelKey, labelValue
 }
 
 // StopContainer 停止容器
-func (cos *ContainerService) StopContainer(ctx context.Context, containerID string, timeout *time.Duration) error {
-	cli := cos.clientManager.GetClient()
+func (cs *ContainerService) StopContainer(ctx context.Context, containerID string, timeout *time.Duration) error {
+	cli := cs.clientManager.GetClient()
 
 	logger.Debug("正在停止容器: %s", containerID[:12])
 
@@ -130,8 +132,8 @@ func (cos *ContainerService) StopContainer(ctx context.Context, containerID stri
 }
 
 // RemoveContainer 删除容器
-func (cos *ContainerService) RemoveContainer(ctx context.Context, containerID string, force bool) error {
-	cli := cos.clientManager.GetClient()
+func (cs *ContainerService) RemoveContainer(ctx context.Context, containerID string, force bool) error {
+	cli := cs.clientManager.GetClient()
 
 	logger.Debug("正在删除容器: %s", containerID[:12])
 
@@ -149,8 +151,8 @@ func (cos *ContainerService) RemoveContainer(ctx context.Context, containerID st
 }
 
 // StartContainer 启动容器
-func (cos *ContainerService) StartContainer(ctx context.Context, containerID string) error {
-	cli := cos.clientManager.GetClient()
+func (cs *ContainerService) StartContainer(ctx context.Context, containerID string) error {
+	cli := cs.clientManager.GetClient()
 
 	logger.Debug("正在启动容器: %s", containerID[:12])
 
@@ -164,8 +166,8 @@ func (cos *ContainerService) StartContainer(ctx context.Context, containerID str
 }
 
 // CreateContainer 创建容器
-func (cos *ContainerService) CreateContainer(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, containerName string) (string, error) {
-	cli := cos.clientManager.GetClient()
+func (cs *ContainerService) CreateContainer(ctx context.Context, config *container.Config, hostConfig *container.HostConfig, networkingConfig *network.NetworkingConfig, containerName string) (string, error) {
+	cli := cs.clientManager.GetClient()
 
 	logger.Debug("正在创建容器: %s", containerName)
 
@@ -207,8 +209,8 @@ func (cs *ContainerService) GetAll(ctx context.Context, includeStopped bool) ([]
 }
 
 // GetContainerConfig 获取容器配置
-func (cos *ContainerService) GetContainerConfig(ctx context.Context, containerID string) (*dockerTypes.ContainerJSON, error) {
-	cli := cos.clientManager.GetClient()
+func (cs *ContainerService) GetContainerConfig(ctx context.Context, containerID string) (*dockerTypes.ContainerJSON, error) {
+	cli := cs.clientManager.GetClient()
 
 	containerJSON, err := cli.ContainerInspect(ctx, containerID)
 	if err != nil {
@@ -217,4 +219,141 @@ func (cos *ContainerService) GetContainerConfig(ctx context.Context, containerID
 	}
 
 	return &containerJSON, nil
+}
+
+func (cs *ContainerService) GetImageInspect(ctx context.Context, imageName string) (*dockerTypes.ImageInspect, error) {
+	cli := cs.clientManager.GetClient()
+
+	imageInfo, _, err := cli.ImageInspectWithRaw(ctx, imageName)
+	if err != nil {
+		logger.Error("获取镜像 %s 信息失败: %v", imageName, err)
+		return nil, fmt.Errorf("获取镜像 %s 信息失败: %w", imageName, err)
+	}
+
+	return &imageInfo, nil
+}
+
+func (cs *ContainerService) GetCreateConfig(ctx context.Context, containerJSON dockerTypes.ContainerJSON, imageInfo *dockerTypes.ImageInspect, imageName string) *container.Config {
+	config := containerJSON.Config
+	hostConfig := containerJSON.HostConfig
+	imageConfig := imageInfo.Config
+
+	if config.WorkingDir == imageConfig.WorkingDir {
+		config.WorkingDir = ""
+	}
+
+	if config.User == imageConfig.User {
+		config.User = ""
+	}
+
+	if hostConfig.NetworkMode.IsContainer() {
+		config.Hostname = ""
+	}
+
+	if utils.SliceEqual(config.Entrypoint, imageConfig.Entrypoint) {
+		config.Entrypoint = nil
+		if utils.SliceEqual(config.Cmd, imageConfig.Cmd) {
+			config.Cmd = nil
+		}
+	}
+
+	// Clear HEALTHCHECK configuration (if default)
+	if config.Healthcheck != nil && imageConfig.Healthcheck != nil {
+		if utils.SliceEqual(config.Healthcheck.Test, imageConfig.Healthcheck.Test) {
+			config.Healthcheck.Test = nil
+		}
+
+		if config.Healthcheck.Retries == imageConfig.Healthcheck.Retries {
+			config.Healthcheck.Retries = 0
+		}
+
+		if config.Healthcheck.Interval == imageConfig.Healthcheck.Interval {
+			config.Healthcheck.Interval = 0
+		}
+
+		if config.Healthcheck.Timeout == imageConfig.Healthcheck.Timeout {
+			config.Healthcheck.Timeout = 0
+		}
+
+		if config.Healthcheck.StartPeriod == imageConfig.Healthcheck.StartPeriod {
+			config.Healthcheck.StartPeriod = 0
+		}
+	}
+
+	config.Env = utils.SliceSubtract(config.Env, imageConfig.Env)
+
+	config.Labels = utils.StringMapSubtract(config.Labels, imageConfig.Labels)
+
+	config.Volumes = utils.StructMapSubtract(config.Volumes, imageConfig.Volumes)
+
+	// 从容器中去除镜像中暴露的端口
+	for k := range config.ExposedPorts {
+		if _, ok := imageConfig.ExposedPorts[k]; ok {
+			delete(config.ExposedPorts, k)
+		}
+	}
+	for p := range containerJSON.HostConfig.PortBindings {
+		config.ExposedPorts[p] = struct{}{}
+	}
+
+	config.Image = imageName
+	return config
+}
+
+func (cs *ContainerService) GetCreateHostConfig(ctx context.Context, containerJSON dockerTypes.ContainerJSON) *container.HostConfig {
+	hostConfig := containerJSON.HostConfig
+
+	for i, link := range hostConfig.Links {
+		name := link[0:strings.Index(link, ":")]
+		alias := link[strings.LastIndex(link, "/"):]
+
+		hostConfig.Links[i] = fmt.Sprintf("%s:%s", name, alias)
+	}
+
+	return hostConfig
+}
+
+func (cs *ContainerService) GetNetworkConfig(ctx context.Context, containerJSON dockerTypes.ContainerJSON) *network.NetworkingConfig {
+	config := &network.NetworkingConfig{
+		EndpointsConfig: containerJSON.NetworkSettings.Networks,
+	}
+
+	// Remove the old container ID alias from the network aliases, as it would accumulate across updates otherwise
+	for _, ep := range config.EndpointsConfig {
+		cidAlias := containerJSON.ID[:12]
+		aliases := make([]string, 0, len(ep.Aliases))
+
+		for _, alias := range ep.Aliases {
+			if alias == cidAlias {
+				continue
+			}
+			aliases = append(aliases, alias)
+		}
+
+		ep.Aliases = aliases
+	}
+
+	return config
+}
+
+func (cs *ContainerService) NetworkDisconnect(ctx context.Context, networkID, containerID string, force bool) error {
+	cli := cs.clientManager.GetClient()
+
+	if err := cli.NetworkDisconnect(ctx, networkID, containerID, force); err != nil {
+		logger.Error("断开容器 %s 与网络 %s 的连接失败: %v", containerID[:12], networkID, err)
+		return fmt.Errorf("断开容器 %s 与网络 %s 的连接失败: %w", containerID[:12], networkID, err)
+	}
+
+	return nil
+}
+
+func (cs *ContainerService) NetworkConnect(ctx context.Context, networkID, containerID string, endpointConfig *network.EndpointSettings) error {
+	cli := cs.clientManager.GetClient()
+
+	if err := cli.NetworkConnect(ctx, networkID, containerID, endpointConfig); err != nil {
+		logger.Error("连接容器 %s 到网络 %s 失败: %v", containerID[:12], networkID, err)
+		return fmt.Errorf("连接容器 %s 到网络 %s 失败: %w", containerID[:12], networkID, err)
+	}
+
+	return nil
 }

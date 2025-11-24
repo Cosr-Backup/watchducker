@@ -349,6 +349,10 @@ watchducker --label
 
 本项目采用 [GNU GPL v3](LICENSE) 许可证。
 
+## 🙏 致谢
+
+- [containrrr/watchtower](https://github.com/containrrr/watchtower/)
+
 ---
 
 **WatchDucker** - 让 Docker 容器更新变得简单智能！

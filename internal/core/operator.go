@@ -10,7 +10,6 @@ import (
 	"watchducker/pkg/logger"
 
 	dockerTypes "github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
 )
 
@@ -42,33 +41,43 @@ func NewOperator() (*Operator, error) {
 }
 
 // createNewContainer 使用新镜像创建新容器
-func (u *Operator) createNewContainer(ctx context.Context, containerConfig *dockerTypes.ContainerJSON, newImage string, containerName string) (string, error) {
-	// 创建容器配置
-	config := &container.Config{
-		Image:  newImage,
-		Cmd:    containerConfig.Config.Cmd,
-		Env:    containerConfig.Config.Env,
-		Labels: containerConfig.Config.Labels,
-	}
+func (u *Operator) createNewContainer(ctx context.Context, containerJSON *dockerTypes.ContainerJSON, imageInfo *dockerTypes.ImageInspect, newImage string, containerName string) (string, error) {
+	// 准备创建容器的配置
+	config := u.containerSvc.GetCreateConfig(ctx, *containerJSON, imageInfo, newImage)
+	hostConfig := u.containerSvc.GetCreateHostConfig(ctx, *containerJSON)
+	networkingConfig := u.containerSvc.GetNetworkConfig(ctx, *containerJSON)
 
-	// 创建主机配置
-	hostConfig := &container.HostConfig{
-		Binds:         containerConfig.HostConfig.Binds,
-		PortBindings:  containerConfig.HostConfig.PortBindings,
-		RestartPolicy: containerConfig.HostConfig.RestartPolicy,
-		NetworkMode:   containerConfig.HostConfig.NetworkMode,
-		VolumesFrom:   containerConfig.HostConfig.VolumesFrom,
-	}
-
-	// 创建网络配置
-	networkingConfig := &network.NetworkingConfig{
-		EndpointsConfig: containerConfig.NetworkSettings.Networks,
-	}
+	// 仅使用一个网络配置来创建容器，之后再连接其他网络
+	simpleNetworkConfig := func() *network.NetworkingConfig {
+		oneEndpoint := make(map[string]*network.EndpointSettings)
+		for k, v := range networkingConfig.EndpointsConfig {
+			oneEndpoint[k] = v
+			break
+		}
+		return &network.NetworkingConfig{EndpointsConfig: oneEndpoint}
+	}()
 
 	// 创建新容器
-	newContainerID, err := u.containerOpsSvc.CreateContainer(ctx, config, hostConfig, networkingConfig, containerName)
+	newContainerID, err := u.containerOpsSvc.CreateContainer(ctx, config, hostConfig, simpleNetworkConfig, containerName)
 	if err != nil {
 		return "", err
+	}
+
+	// 连接其他网络
+	if !(hostConfig.NetworkMode.IsHost()) {
+		for k := range simpleNetworkConfig.EndpointsConfig {
+			err = u.containerOpsSvc.NetworkDisconnect(ctx, k, newContainerID, true)
+			if err != nil {
+				return "", err
+			}
+		}
+
+		for k, v := range networkingConfig.EndpointsConfig {
+			err = u.containerOpsSvc.NetworkConnect(ctx, k, newContainerID, v)
+			if err != nil {
+				return "", err
+			}
+		}
 	}
 
 	return newContainerID, nil
@@ -84,6 +93,12 @@ func (u *Operator) updateContainer(ctx context.Context, containerInfo types.Cont
 		return fmt.Errorf("获取容器配置失败: %w", err)
 	}
 
+	// 获取新镜像信息
+	imageInfo, err := u.containerOpsSvc.GetImageInspect(ctx, newImage)
+	if err != nil {
+		return fmt.Errorf("获取镜像信息失败: %w", err)
+	}
+
 	// 2. 停止容器
 	stopTimeout := 30 * time.Second
 	if err := u.containerOpsSvc.StopContainer(ctx, containerInfo.ID, &stopTimeout); err != nil {
@@ -96,7 +111,7 @@ func (u *Operator) updateContainer(ctx context.Context, containerInfo types.Cont
 	}
 
 	// 4. 使用新镜像创建新容器
-	newContainerID, err := u.createNewContainer(ctx, containerConfig, newImage, containerInfo.Name)
+	newContainerID, err := u.createNewContainer(ctx, containerConfig, imageInfo, newImage, containerInfo.Name)
 	if err != nil {
 		return fmt.Errorf("创建新容器失败: %w", err)
 	}
