@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -252,6 +253,12 @@ func (c *Checker) extractImageReferences(ctx context.Context, containers []types
 				Error:     msg,
 				CheckedAt: time.Now(),
 			})
+			continue
+		}
+
+		// 忽略自身镜像更新检查
+		if normalized == "naomi233/watchducker" || strings.Contains(normalized, "naomi233/watchducker:") {
+			logger.Info("忽略自身镜像检查: %s (容器: %s)", normalized, container.Name)
 			continue
 		}
 
